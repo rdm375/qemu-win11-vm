@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DISK="win11.qcow2"
+WIN_ISO="Win11_25H2_English_x64.iso"
+VIRTIO_ISO="virtio-win-0.1.285.iso"
+
+OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
+OVMF_VARS_TEMPLATE="/usr/share/OVMF/OVMF_VARS_4M.fd"
+OVMF_VARS="win11_VARS.fd"
+
+TPM_DIR="tpm"
+TPM_SOCK="$TPM_DIR/swtpm-sock"
+
+# Sanity checks
+[[ -f "$OVMF_CODE" ]] || { echo "Missing OVMF code: $OVMF_CODE" >&2; exit 1; }
+[[ -f "$OVMF_VARS_TEMPLATE" ]] || { echo "Missing OVMF vars template: $OVMF_VARS_TEMPLATE" >&2; exit 1; }
+[[ -f "$WIN_ISO" ]] || { echo "Missing Windows ISO: $WIN_ISO" >&2; exit 1; }
+[[ -f "$VIRTIO_ISO" ]] || { echo "Missing VirtIO ISO: $VIRTIO_ISO" >&2; exit 1; }
+
+# Create disk if needed
+if [[ ! -f "$DISK" ]]; then
+  qemu-img create -f qcow2 "$DISK" 80G
+fi
+
+# INSTALL BEHAVIOR: always reset NVRAM so no stale Boot#### entries survive
+rm -f "$OVMF_VARS"
+cp -- "$OVMF_VARS_TEMPLATE" "$OVMF_VARS"
+
+# Start swtpm
+mkdir -p "$TPM_DIR"
+if [[ ! -S "$TPM_SOCK" ]]; then
+  swtpm socket \
+    --tpm2 \
+    --ctrl "type=unixio,path=$TPM_SOCK" \
+    --tpmstate "dir=$TPM_DIR" \
+    --daemon
+fi
+
+QEMU_ARGS=(
+  -enable-kvm
+  -m 8G
+  -smp cores=4
+  -cpu host,hv_relaxed,hv_time,hv_vapic,hv_spinlocks=0x1fff
+  -machine q35,usb=on
+  -display sdl
+  -device virtio-vga
+  -device virtio-net-pci,netdev=net0
+  -netdev user,id=net0
+  -device qemu-xhci,id=xhci
+  -device usb-tablet
+
+  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"
+  -drive if=pflash,format=raw,file="$OVMF_VARS"
+
+  -chardev socket,id=chrtpm,path="$TPM_SOCK"
+  -tpmdev emulator,id=tpm0,chardev=chrtpm
+  -device tpm-tis,tpmdev=tpm0
+
+  # CD-ROMs on SATA; make Windows ISO boot first
+  -device ich9-ahci,id=sata
+  -drive if=none,id=cd0,file="$WIN_ISO",media=cdrom,readonly=on
+  -device ide-cd,drive=cd0,bus=sata.0,bootindex=1
+  -drive if=none,id=cd1,file="$VIRTIO_ISO",media=cdrom,readonly=on
+  -device ide-cd,drive=cd1,bus=sata.1
+
+  # Disk as virtio-blk device; boot second
+  -drive if=none,id=vd0,file="$DISK",format=qcow2
+  -device virtio-blk-pci,drive=vd0,bootindex=2
+
+  # Force optical boot this run
+  -boot menu=on,once=d
+)
+
+exec qemu-system-x86_64 "${QEMU_ARGS[@]}"
+
+# shift+F10 OOBE\BYPASSNRO when it whats to connect to a network
+# usrname: USER
+# passwd: passwd
+# first pets name: ralph
+# childhood nickname: ralph
+# name of first school: elementary
+

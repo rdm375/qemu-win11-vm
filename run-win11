@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DISK="win11.qcow2"
+OVMF_CODE="/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
+OVMF_VARS="win11_VARS.fd"
+
+TPM_DIR="tpm"
+TPM_SOCK="$TPM_DIR/swtpm-sock"
+
+# Sanity checks
+[[ -f "$DISK" ]] || { echo "Missing disk: $DISK" >&2; exit 1; }
+[[ -f "$OVMF_VARS" ]] || { echo "Missing OVMF vars: $OVMF_VARS" >&2; exit 1; }
+
+# Start swtpm if needed
+mkdir -p "$TPM_DIR"
+if [[ ! -S "$TPM_SOCK" ]]; then
+  swtpm socket \
+    --tpm2 \
+    --ctrl "type=unixio,path=$TPM_SOCK" \
+    --tpmstate "dir=$TPM_DIR" \
+    --daemon
+fi
+
+qemu-system-x86_64 \
+  -enable-kvm \
+  -m 8G \
+  -smp cores=4 \
+  -cpu host,hv_relaxed,hv_time,hv_vapic,hv_spinlocks=0x1fff \
+  -machine q35,usb=on \
+  -display sdl \
+  -device virtio-vga \
+  -device virtio-net-pci,netdev=net0 \
+  -netdev user,id=net0 \
+  -device qemu-xhci,id=xhci \
+  -device usb-tablet \
+  \
+  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+  -drive if=pflash,format=raw,file="$OVMF_VARS" \
+  \
+  -chardev socket,id=chrtpm,path="$TPM_SOCK" \
+  -tpmdev emulator,id=tpm0,chardev=chrtpm \
+  -device tpm-tis,tpmdev=tpm0 \
+  \
+  -drive if=none,id=vd0,file="$DISK",format=qcow2 \
+  -device virtio-blk-pci,drive=vd0
