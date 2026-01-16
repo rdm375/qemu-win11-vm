@@ -51,6 +51,10 @@ qemu-system-x86_64 \
   -drive if=none,id=vd0,file="$DISK",format=qcow2 \
   -drive file=virtio-win-0.1.285.iso,media=cdrom,readonly=on \
   -device virtio-blk-pci,drive=vd0 \
+  -monitor stdio \
+  \
+  #-device qemu-xhci \
+  #-device usb-host,hostbus=2,hostaddr=16 \
 &
 
 QEMU_PID=$!
@@ -68,27 +72,3 @@ remote-viewer spice://127.0.0.1:5900 &
 
 wait $QEMU_PID
 
-
-
-#qemu-system-x86_64 \
-#  -enable-kvm \
-#  -m 8G \
-#  -smp cores=4 \
-#  -cpu host,hv_relaxed,hv_time,hv_vapic,hv_spinlocks=0x1fff \
-#  -machine q35,usb=on \
-#  -display sdl \
-#  -device virtio-vga \
-#  -device virtio-net-pci,netdev=net0 \
-#  -netdev user,id=net0 \
-#  -device qemu-xhci,id=xhci \
-#  -device usb-tablet \
-#  \
-#  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-#  -drive if=pflash,format=raw,file="$OVMF_VARS" \
-#  \
-#  -chardev socket,id=chrtpm,path="$TPM_SOCK" \
-#  -tpmdev emulator,id=tpm0,chardev=chrtpm \
-#  -device tpm-tis,tpmdev=tpm0 \
-#  \
-#  -drive if=none,id=vd0,file="$DISK",format=qcow2 \
-#  -device virtio-blk-pci,drive=vd0
